@@ -106,10 +106,12 @@ def before_request():
     # Save the HTTP header in the localproxy object
     g.request_headers = request.headers
     g.serial = getParam(request.all_data, "serial", default=None)
+    ua_name, ua_version, _ua_comment = get_plugin_info_from_useragent(request.user_agent.string)
+    g.user_agent = ua_name
     g.audit_object.log({"success": False,
                         "client": g.client_ip,
-                        "user_agent": get_plugin_info_from_useragent(request.user_agent.string)[0],
-                        "user_agent_version": get_plugin_info_from_useragent(request.user_agent.string)[1],
+                        "user_agent": ua_name,
+                        "user_agent_version": ua_version,
                         "privacyidea_server": privacyidea_server,
                         "action": f"{request.method!s} {request.url_rule!s}",
                         "action_detail": "",
@@ -362,19 +364,15 @@ def get_auth_token():
                 # This condition can only be checked if the user was authenticated as it
                 # is the only way to verify if such a user exists.
                 log.warning(f"A user '{user.login}' exists as local admin and as user in your default realm!")
+            g.audit_object.log({
+                "realm": user.realm,
+                "resolver": user.resolver,
+                "serial": serials,
+                "info": log_used_user(user, f"loginmode={details.get('loginmode')}")})
             if role == ROLE.ADMIN:
-                g.audit_object.log({"user": "",
-                                    "administrator": user.login,
-                                    "realm": user.realm,
-                                    "resolver": user.resolver,
-                                    "serial": serials,
-                                    "info": f"{log_used_user(user)}|loginmode={details.get('loginmode')}"})
+                g.audit_object.log({"user": "", "administrator": user.login})
             else:
-                g.audit_object.log({"user": user.login,
-                                    "realm": user.realm,
-                                    "resolver": user.resolver,
-                                    "serial": serials,
-                                    "info": f"{log_used_user(user)}|loginmode={details.get('loginmode')}"})
+                g.audit_object.log({"user": user.login})
 
             if not user_auth and "multi_challenge" in details and len(details["multi_challenge"]) > 0:
                 # Do not return user data in case of a challenge request.
@@ -392,8 +390,9 @@ def get_auth_token():
     if hsm.is_ready:
         nonce = geturandom(hex=True)
         # Add the role to the JWT, so that we can verify it internally and use the authtype for access definitions
-        rights = g.policy_object.ui_get_rights(role, realm, login_name, g.client_ip)
-        menus = g.policy_object.ui_get_main_menus({"username": login_name, "role": role, "realm": realm}, g.client_ip)
+        rights = g.policy_object.ui_get_rights(role, realm, login_name, g.client_ip, g.get("user_agent"))
+        menus = g.policy_object.ui_get_main_menus({"username": login_name, "role": role, "realm": realm}, g.client_ip,
+                                                  g.get("user_agent"))
     else:
         import os
         nonce = hexlify_and_unicode(os.urandom(20))
@@ -482,6 +481,6 @@ def get_rights():
 
     :reqheader Authorization: The authorization token acquired by /auth request
     """
-    enroll_types = g.policy_object.ui_get_enroll_tokentypes(g.client_ip, g.logged_in_user)
+    enroll_types = g.policy_object.ui_get_enroll_tokentypes(g.client_ip, g.logged_in_user, g.get("user_agent"))
     g.audit_object.log({"success": True})
     return send_result(enroll_types)

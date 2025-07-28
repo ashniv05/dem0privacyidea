@@ -1246,8 +1246,8 @@ def check_base_action(request=None, action=None, anonymous=False):
              "admin": "Admin actions are defined, but the action %s is not "
                       "allowed!" % action}
     params = request.all_data
-    user_object = request.User
-    resolver = user_object.resolver if user_object else None
+    user = request.User
+    resolver = user.resolver if user else None
     (role, username, realm, adminuser, adminrealm) = determine_logged_in_userparams(g.logged_in_user, params)
 
     # In certain cases we can not resolve the user by the serial!
@@ -1456,6 +1456,7 @@ def check_client_container_disabled_action(request=None, action=None):
     match = Match.generic(g,
                           scope=SCOPE.CONTAINER,
                           action=action,
+                          user_object=user_attributes.user,
                           user=user_attributes.username,
                           resolver=user_attributes.resolver,
                           realm=user_attributes.realm,
@@ -1602,6 +1603,23 @@ def check_token_init(request=None, action=None):
                                  user_object=request.User).allowed()
     if not init_allowed:
         raise PolicyError(ERROR.get(role))
+    return True
+
+
+def force_server_generate_key(request: Request, action=None):
+    """
+    Checks if for the given token type a policy to force the server to generate the key is set.
+
+    :param request:
+    :param action:
+    :return: True
+    """
+    params = request.all_data
+    tokentype = params.get("type", "HOTP")
+    action = f"{tokentype.lower()}_{ACTION.FORCE_SERVER_GENERATE}"
+    force_genkey = Match.admin_or_user(g, action=action, user_obj=request.User).allowed()
+    g.policies[action] = force_genkey
+
     return True
 
 
@@ -2774,6 +2792,7 @@ def auth_timelimit(request, action):
         result, reply_dict = check_max_auth_success(user, user_search_dict, check_validate_check=not local_admin)
 
     if not result:
-        raise AuthError(_("Authentication failure. The account has exceeded the authentication time limit!"), details=reply_dict)
+        raise AuthError(_("Authentication failure. The account has exceeded the authentication time limit!"),
+                        details=reply_dict)
 
     return True

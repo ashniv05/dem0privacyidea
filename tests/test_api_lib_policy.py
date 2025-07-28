@@ -63,7 +63,7 @@ from privacyidea.api.lib.prepolicy import (check_token_upload,
                                            check_token_action, check_token_list_action, check_user_params,
                                            check_client_container_action, container_registration_config,
                                            smartphone_config, check_client_container_disabled_action, rss_age,
-                                           hide_container_info, require_description_on_edit)
+                                           hide_container_info, require_description_on_edit, force_server_generate_key)
 from privacyidea.lib.realm import set_realm as create_realm
 from privacyidea.lib.realm import delete_realm
 from privacyidea.api.lib.postpolicy import (check_serial, check_tokentype,
@@ -4811,6 +4811,138 @@ class PrePolicyDecoratorTestCase(MyApiTestCase):
         delete_policy("admin")
         delete_policy("user")
 
+    def test_86_force_server_generate_key_user(self):
+        g.logged_in_user = {"username": "hans",
+                            "realm": self.realm1,
+                            "resolver": self.resolvername1,
+                            "role": "user"}
+        user = User("hans", self.realm1)
+        builder = EnvironBuilder(method='POST',
+                                 headers={})
+        env = builder.get_environ()
+        # Test default for users:
+        request = Request(env)
+        request.User = user
+        request.all_data = {"type": "hotp"}
+        set_policy("enroll", SCOPE.USER, action="enrollHOTP, enrollTOTP")
+
+        # Policy is not set
+        g.policies = {}
+        force_server_generate_key(request)
+        self.assertFalse(g.policies.get(f"hotp_{ACTION.FORCE_SERVER_GENERATE}"))
+
+        # Set policy for different token type
+        g.policies = {}
+        set_policy("totp_genkey", scope=SCOPE.USER, action=f"totp_{ACTION.FORCE_SERVER_GENERATE}")
+        force_server_generate_key(request)
+        self.assertFalse(g.policies.get(f"hotp_{ACTION.FORCE_SERVER_GENERATE}"))
+        self.assertNotIn(f"totp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+
+        # Set policy for hotp
+        g.policies = {}
+        set_policy("hotp_genkey", scope=SCOPE.USER, action=f"hotp_{ACTION.FORCE_SERVER_GENERATE}")
+        force_server_generate_key(request)
+        self.assertTrue(g.policies.get(f"hotp_{ACTION.FORCE_SERVER_GENERATE}"))
+        self.assertNotIn(f"totp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+
+        # Test for TOTP
+        g.policies = {}
+        request.all_data = {"type": "totp"}
+        force_server_generate_key(request)
+        self.assertTrue(g.policies.get(f"totp_{ACTION.FORCE_SERVER_GENERATE}"))
+        self.assertNotIn(f"hotp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+
+        # Test for mOTP
+        set_policy("motp_genkey", scope=SCOPE.USER, action=f"motp_{ACTION.FORCE_SERVER_GENERATE}")
+        g.policies = {}
+        request.all_data = {"type": "motp", "motppin": "123"}
+        force_server_generate_key(request)
+        self.assertTrue(g.policies.get(f"motp_{ACTION.FORCE_SERVER_GENERATE}"))
+        self.assertNotIn(f"hotp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+        self.assertNotIn(f"totp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+
+        # Test for applspec
+        set_policy("applspec_genkey", scope=SCOPE.USER, action=f"applspec_{ACTION.FORCE_SERVER_GENERATE}")
+        g.policies = {}
+        request.all_data = {"type": "applspec", "motppin": "123", "service_id": "123"}
+        force_server_generate_key(request)
+        self.assertTrue(g.policies.get(f"applspec_{ACTION.FORCE_SERVER_GENERATE}"))
+        self.assertNotIn(f"hotp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+        self.assertNotIn(f"totp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+        self.assertNotIn(f"motp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+
+        # Test for a token type not having this policy
+        g.policies = {}
+        request.all_data = {"type": "spass"}
+        force_server_generate_key(request)
+        self.assertFalse(g.policies.get(f"spass_{ACTION.FORCE_SERVER_GENERATE}"))
+        self.assertNotIn(f"hotp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+        self.assertNotIn(f"totp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+        self.assertNotIn(f"motp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+        self.assertNotIn(f"applspec_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+
+        delete_policy("enroll")
+        delete_policy("totp_genkey")
+        delete_policy("hotp_genkey")
+        delete_policy("motp_genkey")
+        delete_policy("applspec_genkey")
+
+    def test_86_force_server_generate_key_admin(self):
+        g.logged_in_user = {"username": self.testadmin, "realm": "",
+                            "role": "admin"}
+        builder = EnvironBuilder(method='POST',
+                                 headers={})
+        env = builder.get_environ()
+        # Test default for users:
+        request = Request(env)
+        request.User = User()
+        request.all_data = {"type": "hotp"}
+        set_policy("enroll", SCOPE.ADMIN, action="enrollHOTP, enrollTOTP")
+
+        # Policy is not set
+        g.policies = {}
+        force_server_generate_key(request)
+        self.assertFalse(g.policies.get(f"hotp_{ACTION.FORCE_SERVER_GENERATE}"))
+
+        # Set policy for hotp
+        g.policies = {}
+        set_policy("hotp_genkey", scope=SCOPE.ADMIN, action=f"hotp_{ACTION.FORCE_SERVER_GENERATE}")
+        force_server_generate_key(request)
+        self.assertTrue(g.policies.get(f"hotp_{ACTION.FORCE_SERVER_GENERATE}"))
+
+        # Test for TOTP
+        set_policy("totp_genkey", scope=SCOPE.ADMIN, action=f"totp_{ACTION.FORCE_SERVER_GENERATE}")
+        g.policies = {}
+        request.all_data = {"type": "totp"}
+        force_server_generate_key(request)
+        self.assertTrue(g.policies.get(f"totp_{ACTION.FORCE_SERVER_GENERATE}"))
+        self.assertNotIn(f"hotp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+
+        # Test for mOTP
+        set_policy("motp_genkey", scope=SCOPE.ADMIN, action=f"motp_{ACTION.FORCE_SERVER_GENERATE}")
+        g.policies = {}
+        request.all_data = {"type": "motp", "motppin": "123"}
+        force_server_generate_key(request)
+        self.assertTrue(g.policies.get(f"motp_{ACTION.FORCE_SERVER_GENERATE}"))
+        self.assertNotIn(f"hotp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+        self.assertNotIn(f"totp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+
+        # Test for applspec
+        set_policy("applspec_genkey", scope=SCOPE.ADMIN, action=f"applspec_{ACTION.FORCE_SERVER_GENERATE}")
+        g.policies = {}
+        request.all_data = {"type": "applspec", "motppin": "123", "service_id": "123"}
+        force_server_generate_key(request)
+        self.assertTrue(g.policies.get(f"applspec_{ACTION.FORCE_SERVER_GENERATE}"))
+        self.assertNotIn(f"hotp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+        self.assertNotIn(f"totp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+        self.assertNotIn(f"motp_{ACTION.FORCE_SERVER_GENERATE}", g.policies)
+
+        delete_policy("enroll")
+        delete_policy("totp_genkey")
+        delete_policy("hotp_genkey")
+        delete_policy("motp_genkey")
+        delete_policy("applspec_genkey")
+
 
 class PostPolicyDecoratorTestCase(MyApiTestCase):
 
@@ -5460,13 +5592,15 @@ class PostPolicyDecoratorTestCase(MyApiTestCase):
         env["REMOTE_ADDR"] = "192.168.0.1"
         g.client_ip = env["REMOTE_ADDR"]
         req = Request(env)
+        req.User = User("cornelius", self.realm1)
         req.all_data = {"user": "cornelius",
                         "pass": "offline287082"}
 
         res = {"jsonrpc": "2.0",
                "result": {"status": True,
                           "value": {"role": "user",
-                                    "username": "cornelius"}},
+                                    "username": "cornelius",
+                                    "realm": self.realm1}},
                "version": "privacyIDEA test",
                "detail": {"serial": None},
                "id": 1}
@@ -5593,13 +5727,15 @@ class PostPolicyDecoratorTestCase(MyApiTestCase):
         env["REMOTE_ADDR"] = "192.168.0.1"
         g.client_ip = env["REMOTE_ADDR"]
         req = Request(env)
+        req.User = User("cornelius", self.realm1)
         req.all_data = {"user": "cornelius",
                         "pass": "offline287082"}
 
         res = {"jsonrpc": "2.0",
                "result": {"status": True,
                           "value": {"role": "user",
-                                    "username": "cornelius"}},
+                                    "username": "cornelius",
+                                    "realm": self.realm1}},
                "version": "privacyIDEA test",
                "id": 1}
         resp = jsonify(res)
@@ -5647,12 +5783,14 @@ class PostPolicyDecoratorTestCase(MyApiTestCase):
         env["REMOTE_ADDR"] = "192.168.0.1"
         g.client_ip = env["REMOTE_ADDR"]
         req = Request(env)
+        req.User = User()
         req.all_data = {}
 
         res = {"jsonrpc": "2.0",
                "result": {"status": True,
                           "value": {"role": "admin",
-                                    "username": "cornelius"}},
+                                    "username": "cornelius",
+                                    "realm": ""}},
                "version": "privacyIDEA test",
                "id": 1}
         resp = jsonify(res)
@@ -5685,12 +5823,14 @@ class PostPolicyDecoratorTestCase(MyApiTestCase):
         env["REMOTE_ADDR"] = "192.168.0.1"
         g.client_ip = env["REMOTE_ADDR"]
         req = Request(env)
+        req.User = User()
         req.all_data = {}
 
         res = {"jsonrpc": "2.0",
                "result": {"status": True,
                           "value": {"role": "admin",
-                                    "username": "cornelius"}},
+                                    "username": "cornelius",
+                                    "realm": ""}},
                "version": "privacyIDEA test",
                "id": 1}
         resp = jsonify(res)
@@ -5725,18 +5865,21 @@ class PostPolicyDecoratorTestCase(MyApiTestCase):
         builder = EnvironBuilder(method="POST", data={}, headers={})
         env = builder.get_environ()
         req = Request(env)
+        req.User = User("cornelius", self.realm1)
         req.all_data = {}
 
         user_response = {"jsonrpc": "2.0",
                          "result": {"status": True,
                                     "value": {"role": "user",
-                                              "username": "cornelius"}},
+                                              "username": "cornelius",
+                                              "realm": self.realm1}},
                          "version": "privacyIDEA test",
                          "id": 1}
         admin_response = {"jsonrpc": "2.0",
                           "result": {"status": True,
                                      "value": {"role": "admin",
-                                               "username": "cornelius"}},
+                                               "username": "cornelius",
+                                               "realm": ""}},
                           "version": "privacyIDEA test",
                           "id": 1}
 
@@ -5769,6 +5912,7 @@ class PostPolicyDecoratorTestCase(MyApiTestCase):
 
         # Admin without container: container wizard disabled
         resp = jsonify(admin_response)
+        req.User = User()
         new_response = get_webui_settings(req, resp)
         container_wizard = new_response.json["result"]["value"]["container_wizard"]
         self.assertFalse(container_wizard["enabled"])
@@ -5778,6 +5922,7 @@ class PostPolicyDecoratorTestCase(MyApiTestCase):
         container_serial = init_container({"type": "generic", "user": "cornelius", "realm": self.realm1})[
             "container_serial"]
         resp = jsonify(user_response)
+        req.User = User("cornelius", self.realm1)
         new_response = get_webui_settings(req, resp)
         container_wizard = new_response.json["result"]["value"]["container_wizard"]
         self.assertFalse(container_wizard["enabled"])
